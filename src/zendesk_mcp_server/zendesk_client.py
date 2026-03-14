@@ -31,6 +31,15 @@ class ZendeskClient:
         encoded_credentials = base64.b64encode(credentials.encode()).decode('ascii')
         self.auth_header = f"Basic {encoded_credentials}"
 
+    def _get_zendesk_host(self) -> str:
+        return f"{self.subdomain}.zendesk.com"
+
+    def _is_allowed_attachment_host(self, hostname: str | None) -> bool:
+        if not hostname:
+            return False
+        host = hostname.lower()
+        return host == self._get_zendesk_host() or host.endswith(".zdusercontent.com")
+
     def get_ticket(self, ticket_id: int) -> Dict[str, Any]:
         """
         Query a ticket by its ID
@@ -110,44 +119,57 @@ class ZendeskClient:
         which is required — the CDN returns 403 if it receives an auth header.
         """
         try:
-            response = _requests.get(
+            parsed_url = urllib.parse.urlparse(content_url)
+            request_host = parsed_url.hostname
+            if parsed_url.scheme != "https" or not self._is_allowed_attachment_host(request_host):
+                raise ValueError("Attachment URL must use HTTPS and point to the configured Zendesk host or Zendesk CDN.")
+
+            headers = {}
+            if request_host and request_host.lower() == self._get_zendesk_host():
+                headers['Authorization'] = self.auth_header
+
+            with _requests.get(
                 content_url,
-                headers={'Authorization': self.auth_header},
+                headers=headers,
                 timeout=30,
                 stream=True,
-            )
-            response.raise_for_status()
+            ) as response:
+                response.raise_for_status()
 
-            content_type = response.headers.get('Content-Type', '').split(';')[0].strip().lower()
+                final_host = urllib.parse.urlparse(response.url).hostname
+                if not self._is_allowed_attachment_host(final_host):
+                    raise ValueError("Attachment redirect target is not an allowed Zendesk host.")
 
-            if content_type not in self._ALLOWED_IMAGE_TYPES:
-                raise ValueError(
-                    f"Attachment type '{content_type}' is not allowed. "
-                    f"Supported types: {sorted(self._ALLOWED_IMAGE_TYPES)}"
-                )
+                content_type = response.headers.get('Content-Type', '').split(';')[0].strip().lower()
 
-            # Read with size cap — stops download as soon as limit is exceeded.
-            chunks = []
-            total = 0
-            for chunk in response.iter_content(chunk_size=65536):
-                total += len(chunk)
-                if total > self._MAX_ATTACHMENT_BYTES:
+                if content_type not in self._ALLOWED_IMAGE_TYPES:
                     raise ValueError(
-                        f"Attachment exceeds the {self._MAX_ATTACHMENT_BYTES // (1024*1024)} MB size limit."
+                        f"Attachment type '{content_type}' is not allowed. "
+                        f"Supported types: {sorted(self._ALLOWED_IMAGE_TYPES)}"
                     )
-                chunks.append(chunk)
-            content = b''.join(chunks)
 
-            # Validate magic bytes to catch MIME type spoofing.
-            magic_signatures = self._MAGIC_BYTES.get(content_type, [])
-            if magic_signatures and not any(content.startswith(sig) for sig in magic_signatures):
-                raise ValueError(
-                    f"File header does not match declared content type '{content_type}'. "
-                    "The attachment may be spoofed."
-                )
-            # Extra check for WebP: bytes 8–12 must be b'WEBP'.
-            if content_type == 'image/webp' and content[8:12] != b'WEBP':
-                raise ValueError("File header does not match declared content type 'image/webp'.")
+                # Read with size cap — stops download as soon as limit is exceeded.
+                chunks = []
+                total = 0
+                for chunk in response.iter_content(chunk_size=65536):
+                    total += len(chunk)
+                    if total > self._MAX_ATTACHMENT_BYTES:
+                        raise ValueError(
+                            f"Attachment exceeds the {self._MAX_ATTACHMENT_BYTES // (1024*1024)} MB size limit."
+                        )
+                    chunks.append(chunk)
+                content = b''.join(chunks)
+
+                # Validate magic bytes to catch MIME type spoofing.
+                magic_signatures = self._MAGIC_BYTES.get(content_type, [])
+                if magic_signatures and not any(content.startswith(sig) for sig in magic_signatures):
+                    raise ValueError(
+                        f"File header does not match declared content type '{content_type}'. "
+                        "The attachment may be spoofed."
+                    )
+                # Extra check for WebP: bytes 8–12 must be b'WEBP'.
+                if content_type == 'image/webp' and content[8:12] != b'WEBP':
+                    raise ValueError("File header does not match declared content type 'image/webp'.")
 
             return {
                 'data': base64.b64encode(content).decode('ascii'),
