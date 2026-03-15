@@ -1,0 +1,22 @@
+services:
+  zendesk:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: zendesk-mcp-server:local
+    env_file:
+      - .env
+
+    # MCP server communicates over STDIN/STDOUT (equivalent to `docker run -i`)
+    stdin_open: true
+    tty: false
+
+    # Basic hardening (the Dockerfile already runs as a non-root user)
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
