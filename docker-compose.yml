@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: zendesk-mcp-server:local
+    image: 7sigmasystems/zendesk-mcp-server:latest
     env_file:
       - .env
 
