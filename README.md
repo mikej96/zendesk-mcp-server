@@ -108,6 +108,31 @@ Fetch the latest tickets with pagination support
 
 - Output: Returns a list of tickets with essential fields including id, subject, status, priority, description, timestamps, and assignee information, along with pagination metadata
 
+### search_tickets
+
+Search Zendesk tickets with free text and field filters
+
+- Input:
+  - `query` (string, optional): Free text search query or additional Zendesk search terms
+  - `status` (string, optional): one of `new`, `open`, `pending`, `hold`, `solved`, `closed`
+  - `priority` (string, optional): one of `low`, `normal`, `high`, `urgent`
+  - `assignee` (integer, optional)
+  - `requester` (integer, optional)
+  - `commenter` (integer, optional)
+  - `group` (integer, optional)
+  - `organization` (integer, optional)
+  - `tags` (array[string], optional)
+  - `created_after` (string, optional): ISO8601 date or datetime
+  - `created_before` (string, optional): ISO8601 date or datetime
+  - `updated_after` (string, optional): ISO8601 date or datetime
+  - `updated_before` (string, optional): ISO8601 date or datetime
+  - `sort_by` (string, optional): one of `created_at`, `updated_at`, `priority`, `status`
+  - `sort_order` (string, optional): `asc` or `desc`
+  - `page` (integer, optional): Page number (defaults to 1)
+  - `per_page` (integer, optional): Number of tickets per page, max 100 (defaults to 25)
+
+- Output: Returns matching tickets with the applied Zendesk search query and pagination metadata
+
 ### get_ticket
 
 Retrieve a Zendesk ticket by its ID

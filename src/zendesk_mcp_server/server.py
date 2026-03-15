@@ -189,6 +189,93 @@ async def handle_list_tools() -> list[types.Tool]:
             }
         ),
         types.Tool(
+            name="search_tickets",
+            description="Search Zendesk tickets with free text and filters for status, priority, assignee, requester, commenter, dates, and more",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Free text search query or additional Zendesk search terms"
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Filter by status",
+                        "enum": ["new", "open", "pending", "hold", "solved", "closed"]
+                    },
+                    "priority": {
+                        "type": "string",
+                        "description": "Filter by priority",
+                        "enum": ["low", "normal", "high", "urgent"]
+                    },
+                    "assignee": {
+                        "type": "integer",
+                        "description": "Filter by assignee user ID"
+                    },
+                    "requester": {
+                        "type": "integer",
+                        "description": "Filter by requester user ID"
+                    },
+                    "commenter": {
+                        "type": "integer",
+                        "description": "Filter by commenter user ID"
+                    },
+                    "group": {
+                        "type": "integer",
+                        "description": "Filter by group ID"
+                    },
+                    "organization": {
+                        "type": "integer",
+                        "description": "Filter by organization ID"
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Filter by tags"
+                    },
+                    "created_after": {
+                        "type": "string",
+                        "description": "Tickets created after this ISO 8601 date or datetime"
+                    },
+                    "created_before": {
+                        "type": "string",
+                        "description": "Tickets created before this ISO 8601 date or datetime"
+                    },
+                    "updated_after": {
+                        "type": "string",
+                        "description": "Tickets updated after this ISO 8601 date or datetime"
+                    },
+                    "updated_before": {
+                        "type": "string",
+                        "description": "Tickets updated before this ISO 8601 date or datetime"
+                    },
+                    "sort_by": {
+                        "type": "string",
+                        "description": "Field to sort by (created_at, updated_at, priority, status)",
+                        "enum": ["created_at", "updated_at", "priority", "status"],
+                        "default": "created_at"
+                    },
+                    "sort_order": {
+                        "type": "string",
+                        "description": "Sort order (asc or desc)",
+                        "enum": ["asc", "desc"],
+                        "default": "desc"
+                    },
+                    "page": {
+                        "type": "integer",
+                        "description": "Page number",
+                        "default": 1
+                    },
+                    "per_page": {
+                        "type": "integer",
+                        "description": "Number of tickets per page (max 100)",
+                        "default": 25
+                    }
+                },
+                "required": []
+            }
+        ),
+        types.Tool(
             name="get_ticket_comments",
             description="Retrieve all comments for a Zendesk ticket by its ID",
             inputSchema={
@@ -307,6 +394,31 @@ async def handle_call_tool(
                 per_page=per_page,
                 sort_by=sort_by,
                 sort_order=sort_order
+            )
+            return [types.TextContent(
+                type="text",
+                text=json.dumps(tickets, indent=2)
+            )]
+
+        elif name == "search_tickets":
+            tickets = zendesk_client.search_tickets(
+                query=arguments.get("query") if arguments else None,
+                status=arguments.get("status") if arguments else None,
+                priority=arguments.get("priority") if arguments else None,
+                assignee=arguments.get("assignee") if arguments else None,
+                requester=arguments.get("requester") if arguments else None,
+                commenter=arguments.get("commenter") if arguments else None,
+                group=arguments.get("group") if arguments else None,
+                organization=arguments.get("organization") if arguments else None,
+                tags=arguments.get("tags") if arguments else None,
+                created_after=arguments.get("created_after") if arguments else None,
+                created_before=arguments.get("created_before") if arguments else None,
+                updated_after=arguments.get("updated_after") if arguments else None,
+                updated_before=arguments.get("updated_before") if arguments else None,
+                sort_by=arguments.get("sort_by", "created_at") if arguments else "created_at",
+                sort_order=arguments.get("sort_order", "desc") if arguments else "desc",
+                page=arguments.get("page", 1) if arguments else 1,
+                per_page=arguments.get("per_page", 25) if arguments else 25
             )
             return [types.TextContent(
                 type="text",

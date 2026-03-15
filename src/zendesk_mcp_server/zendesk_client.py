@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Dict, Any, List
 import json
 import urllib.request
@@ -39,6 +40,74 @@ class ZendeskClient:
             return False
         host = hostname.lower()
         return host == self._get_zendesk_host() or host.endswith(".zdusercontent.com")
+
+    def _normalize_search_date(self, value: str, field_name: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError(f"{field_name} must not be empty")
+        try:
+            datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError(
+                f"{field_name} must be an ISO 8601 date or datetime, for example 2026-01-30 or 2026-01-30T17:20:02Z"
+            ) from exc
+        return normalized
+
+    def _quote_search_value(self, value: str) -> str:
+        escaped = value.replace('"', '\\"')
+        return f'"{escaped}"' if any(char.isspace() for char in escaped) else escaped
+
+    def _build_ticket_search_query(
+        self,
+        query: str | None = None,
+        status: str | None = None,
+        priority: str | None = None,
+        assignee: int | None = None,
+        requester: int | None = None,
+        commenter: int | None = None,
+        group: int | None = None,
+        organization: int | None = None,
+        tags: List[str] | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
+        updated_after: str | None = None,
+        updated_before: str | None = None,
+    ) -> str:
+        terms = ["type:ticket"]
+
+        free_text = " ".join((query or "").split())
+        if free_text:
+            terms.append(free_text)
+
+        if status:
+            terms.append(f"status:{status}")
+        if priority:
+            terms.append(f"priority:{priority}")
+        if assignee is not None:
+            terms.append(f"assignee:{int(assignee)}")
+        if requester is not None:
+            terms.append(f"requester:{int(requester)}")
+        if commenter is not None:
+            terms.append(f"commenter:{int(commenter)}")
+        if group is not None:
+            terms.append(f"group:{int(group)}")
+        if organization is not None:
+            terms.append(f"organization:{int(organization)}")
+        if tags:
+            for tag in tags:
+                tag_value = str(tag).strip()
+                if tag_value:
+                    terms.append(f"tags:{self._quote_search_value(tag_value)}")
+        if created_after:
+            terms.append(f"created>{self._normalize_search_date(created_after, 'created_after')}")
+        if created_before:
+            terms.append(f"created<{self._normalize_search_date(created_before, 'created_before')}")
+        if updated_after:
+            terms.append(f"updated>{self._normalize_search_date(updated_after, 'updated_after')}")
+        if updated_before:
+            terms.append(f"updated<{self._normalize_search_date(updated_before, 'updated_before')}")
+
+        return " ".join(terms)
 
     def get_ticket(self, ticket_id: int) -> Dict[str, Any]:
         """
@@ -194,6 +263,110 @@ class ZendeskClient:
             return comment
         except Exception as e:
             raise Exception(f"Failed to post comment on ticket {ticket_id}: {str(e)}")
+
+    def search_tickets(
+        self,
+        query: str | None = None,
+        status: str | None = None,
+        priority: str | None = None,
+        assignee: int | None = None,
+        requester: int | None = None,
+        commenter: int | None = None,
+        group: int | None = None,
+        organization: int | None = None,
+        tags: List[str] | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
+        updated_after: str | None = None,
+        updated_before: str | None = None,
+        sort_by: str = 'created_at',
+        sort_order: str = 'desc',
+        page: int = 1,
+        per_page: int = 25,
+    ) -> Dict[str, Any]:
+        """
+        Search Zendesk tickets with free text and ticket-property filters.
+        """
+        try:
+            allowed_sort_fields = {'created_at', 'updated_at', 'priority', 'status'}
+            allowed_sort_orders = {'asc', 'desc'}
+
+            if sort_by not in allowed_sort_fields:
+                raise ValueError(f"sort_by must be one of {sorted(allowed_sort_fields)}")
+            if sort_order not in allowed_sort_orders:
+                raise ValueError(f"sort_order must be one of {sorted(allowed_sort_orders)}")
+            if page < 1:
+                raise ValueError("page must be >= 1")
+
+            per_page = min(max(per_page, 1), 100)
+            search_query = self._build_ticket_search_query(
+                query=query,
+                status=status,
+                priority=priority,
+                assignee=assignee,
+                requester=requester,
+                commenter=commenter,
+                group=group,
+                organization=organization,
+                tags=tags,
+                created_after=created_after,
+                created_before=created_before,
+                updated_after=updated_after,
+                updated_before=updated_before,
+            )
+
+            params = {
+                'query': search_query,
+                'page': str(page),
+                'per_page': str(per_page),
+                'sort_by': sort_by,
+                'sort_order': sort_order,
+            }
+            query_string = urllib.parse.urlencode(params)
+            url = f"{self.base_url}/search.json?{query_string}"
+
+            req = urllib.request.Request(url)
+            req.add_header('Authorization', self.auth_header)
+            req.add_header('Content-Type', 'application/json')
+
+            with urllib.request.urlopen(req) as response:
+                data = json.loads(response.read().decode())
+
+            results = data.get('results', [])
+            ticket_list = []
+            for ticket in results:
+                if ticket.get('result_type') != 'ticket':
+                    continue
+                ticket_list.append({
+                    'id': ticket.get('id'),
+                    'subject': ticket.get('subject'),
+                    'status': ticket.get('status'),
+                    'priority': ticket.get('priority'),
+                    'description': ticket.get('description'),
+                    'created_at': ticket.get('created_at'),
+                    'updated_at': ticket.get('updated_at'),
+                    'requester_id': ticket.get('requester_id'),
+                    'assignee_id': ticket.get('assignee_id'),
+                })
+
+            return {
+                'tickets': ticket_list,
+                'page': page,
+                'per_page': per_page,
+                'count': len(ticket_list),
+                'total_count': data.get('count'),
+                'query': search_query,
+                'sort_by': sort_by,
+                'sort_order': sort_order,
+                'has_more': data.get('next_page') is not None,
+                'next_page': page + 1 if data.get('next_page') else None,
+                'previous_page': page - 1 if data.get('previous_page') and page > 1 else None,
+            }
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode() if e.fp else "No response body"
+            raise Exception(f"Failed to search tickets: HTTP {e.code} - {e.reason}. {error_body}")
+        except Exception as e:
+            raise Exception(f"Failed to search tickets: {str(e)}")
 
     def get_tickets(self, page: int = 1, per_page: int = 25, sort_by: str = 'created_at', sort_order: str = 'desc') -> Dict[str, Any]:
         """
