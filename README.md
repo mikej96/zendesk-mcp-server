@@ -1,6 +1,5 @@
 # Zendesk MCP Server
 
-![ci](https://github.com/reminia/zendesk-mcp-server/actions/workflows/ci.yml/badge.svg)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 A Model Context Protocol server for Zendesk.
@@ -15,70 +14,77 @@ This server provides a comprehensive integration with Zendesk. It offers:
 
 ## Setup
 
-- build: `uv venv && uv pip install -e .` or `uv build` in short.
-- setup zendesk credentials in `.env` file, refer to [.env.example](.env.example).
-- configure in Claude desktop:
+The published image at [`7sigmasystems/zendesk-mcp-server`](https://hub.docker.com/r/7sigmasystems/zendesk-mcp-server) on Docker Hub is the easiest way to run this server — no build step required. The image is rebuilt and pushed automatically on every push to `main` (see [`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml)).
 
-```json
-{
-  "mcpServers": {
-      "zendesk": {
-          "command": "uv",
-          "args": [
-              "--directory",
-              "/path/to/zendesk-mcp-server",
-              "run",
-              "zendesk"
-          ]
-      }
-  }
-}
-```
+1. Copy `.env.example` to `.env` and fill in `ZENDESK_SUBDOMAIN`, `ZENDESK_EMAIL`, and `ZENDESK_API_KEY`. Keep this file outside version control.
 
-### Docker
-
-You can containerize the server if you prefer an isolated runtime:
-
-1. Copy `.env.example` to `.env` and fill in your Zendesk credentials. Keep this file outside version control.
-2. Build the image:
+2. Register the server with Claude Code:
 
    ```bash
-   docker build -t zendesk-mcp-server .
+   claude mcp add zendesk -- /usr/bin/docker run --rm -i \
+     --env-file /path/to/zendesk-mcp-server/.env \
+     7sigmasystems/zendesk-mcp-server:latest
    ```
 
-3. Run the server, providing the environment file:
+   Docker will pull the image automatically on first use. Run `which docker` if you need to confirm the binary path on your system.
 
-   ```bash
-   docker run --rm --env-file /path/to/.env zendesk-mcp-server
+   To configure by hand instead, add an entry to Claude Code's `settings.json` (or `~/.claude.json` / `.mcp.json`):
+
+   ```json
+   {
+     "mcpServers": {
+       "zendesk": {
+         "command": "/usr/bin/docker",
+         "args": [
+           "run",
+           "--rm",
+           "-i",
+           "--env-file",
+           "/path/to/zendesk-mcp-server/.env",
+           "7sigmasystems/zendesk-mcp-server:latest"
+         ]
+       }
+     }
+   }
    ```
 
-   Add `-i` when wiring the container to MCP clients over STDIN/STDOUT (Claude Code uses this mode). For daemonized runs, add `-d --name zendesk-mcp`.
+3. Restart Claude Code, then run `/mcp` to verify the `zendesk` server shows as connected.
+
+> **Do not launch the container yourself with `docker compose up` or a bare `docker run`.** This server speaks MCP over STDIN/STDOUT, so it is not a long-running daemon — the MCP client (Claude Code / Claude Desktop) spawns the container on demand so it owns the stdio pipes. A standalone `docker compose up` will print `zendesk mcp server started` and then sit idle with nothing connected.
 
 The image installs dependencies from `requirements.lock`, drops privileges to a non-root user, and expects configuration exclusively via environment variables.
 
-#### Claude MCP Integration
+### Building from source
 
-To use the Dockerized server from Claude Code/Desktop, add an entry to Claude Code's `settings.json` similar to:
+You only need to build locally if you're modifying the server. CI keeps `:latest` on Docker Hub in sync with the tip of `main`.
+
+**Python / `uv`** — run directly from a checkout:
+
+```bash
+uv venv && uv pip install -e .   # or `uv build` for a wheel
+```
+
+Then point Claude Code at the local checkout:
 
 ```json
 {
   "mcpServers": {
     "zendesk": {
-      "command": "/usr/local/bin/docker",
-      "args": [
-        "run",
-        "--rm",
-        "-i",
-        "--env-file",
-        "/path/to/zendesk-mcp-server/.env",
-        "zendesk-mcp-server"
-      ]
+      "command": "uv",
+      "args": ["--directory", "/path/to/zendesk-mcp-server", "run", "zendesk"]
     }
   }
 }
 ```
 
-Adjust the paths to match your environment. After saving the file, restart Claude for the new MCP server to be detected.
+**Docker** — rebuild the image locally for testing:
+
+```bash
+docker compose build              # incremental
+docker compose build --no-cache   # clean rebuild
+```
+
+This tags the result as `7sigmasystems/zendesk-mcp-server:latest`, **shadowing the published image on this machine** until you `docker pull` again. Your Claude Code config does not need to change — it will pick up whichever `:latest` Docker resolves locally.
 
 ## Resources
 
